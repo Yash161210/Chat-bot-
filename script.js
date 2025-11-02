@@ -205,16 +205,22 @@ async function getAIResponse(userMessage) {
 
 // Format square root answers to "Square root of X = Y" format
 function formatSquareRootAnswer(text) {
-    // Normalize text by removing extra whitespace for pattern matching
-    const normalizedText = text.replace(/\s+/g, ' ');
+    // Remove all LaTeX display blocks \[ ... \] completely
+    let cleanedText = text.replace(/\\\[[\s\S]*?\\\]/g, '');
+    
+    // Remove all LaTeX inline math \( ... \)
+    cleanedText = cleanedText.replace(/\\\([\s\S]*?\\\)/g, '');
+    
+    // Normalize text by removing extra whitespace
+    const normalizedText = cleanedText.replace(/\s+/g, ' ').trim();
     
     // Extract number from various patterns
     let number = null;
     let result = null;
     
-    // Pattern 1: LaTeX with result: \sqrt{144} = 12 (handles multiline)
+    // Pattern 1: LaTeX with result: \sqrt{144} = 12 (even after cleaning)
     const latexWithResult = /\\sqrt\{(\d+)\}\s*=\s*(\d+)/;
-    const latexResultMatch = normalizedText.match(latexWithResult);
+    const latexResultMatch = text.match(latexWithResult);
     
     if (latexResultMatch) {
         number = parseInt(latexResultMatch[1]);
@@ -231,7 +237,7 @@ function formatSquareRootAnswer(text) {
     
     // Pattern 3: LaTeX \sqrt{144} (without result, need to calculate)
     const latexRegex = /\\sqrt\{(\d+)\}/;
-    const latexMatch = normalizedText.match(latexRegex);
+    const latexMatch = text.match(latexRegex);
     
     // Pattern 4: Extract from "sqrt(144)" or similar
     const sqrtFuncRegex = /sqrt\((\d+)\)/i;
@@ -252,11 +258,11 @@ function formatSquareRootAnswer(text) {
             result = Math.sqrt(number);
             // Only format if it's a whole number
             if (result !== Math.floor(result)) {
-                return text; // Return original if not a perfect square
+                return cleanedText; // Return cleaned text if not a perfect square
             }
         }
         
-        // Return in the exact format requested
+        // Return ONLY the answer in the exact format requested
         return `Square root of ${number} = ${result}`;
     }
     
@@ -271,8 +277,8 @@ function formatSquareRootAnswer(text) {
         }
     }
     
-    // If no pattern matched, return original text
-    return text;
+    // If no pattern matched, return cleaned text (without LaTeX blocks)
+    return cleanedText;
 }
 
 // Add message to UI
@@ -281,7 +287,16 @@ function addMessage(text, sender, isError = false) {
     messageDiv.className = `message ${sender}`;
     
     const bubbleDiv = document.createElement('div');
-    bubbleDiv.className = 'message-bubble tex2jax_process';
+    
+    // Check if this is a square root answer (simple format, no LaTeX)
+    const isSquareRootAnswer = /^Square root of \d+ = \d+$/.test(text);
+    
+    if (isSquareRootAnswer) {
+        // Don't add MathJax class for simple square root answers
+        bubbleDiv.className = 'message-bubble';
+    } else {
+        bubbleDiv.className = 'message-bubble tex2jax_process';
+    }
     
     // Format message text (preserve line breaks)
     const formattedText = formatMessage(text);
@@ -302,10 +317,12 @@ function addMessage(text, sender, isError = false) {
     // Add animation
     messageDiv.style.animation = 'messageSlide 0.3s ease-out';
     
-    // Render MathJax equations (with small delay to ensure DOM is ready)
-    setTimeout(() => {
-        renderMathJax(bubbleDiv);
-    }, 50);
+    // Only render MathJax if it's not a simple square root answer
+    if (!isSquareRootAnswer) {
+        setTimeout(() => {
+            renderMathJax(bubbleDiv);
+        }, 50);
+    }
 }
 
 // Render MathJax equations in an element
