@@ -22,6 +22,7 @@ const menuBtn = document.getElementById('menuBtn');
 // Chat History
 let chatHistory = [];
 let isWaitingForResponse = false;
+let mathJaxReady = false;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -29,7 +30,21 @@ document.addEventListener('DOMContentLoaded', () => {
     adjustTextareaHeight();
     loadChatHistory();
     hideWelcomeMessage();
+    waitForMathJax();
 });
+
+// Wait for MathJax to load
+function waitForMathJax() {
+    if (window.MathJax && window.MathJax.startup && window.MathJax.startup.ready) {
+        window.MathJax.startup.promise.then(() => {
+            mathJaxReady = true;
+            console.log('MathJax is ready');
+        });
+    } else {
+        // Check periodically if MathJax loads later
+        setTimeout(waitForMathJax, 100);
+    }
+}
 
 // Event Listeners
 function initializeEventListeners() {
@@ -172,9 +187,12 @@ async function getAIResponse(userMessage) {
     const data = await response.json();
     
     // Extract AI response
-    const aiMessage = data.choices?.[0]?.message?.content || 
-                      data.content || 
-                      "I'm sorry, I couldn't generate a response. Please try again.";
+    let aiMessage = data.choices?.[0]?.message?.content || 
+                    data.content || 
+                    "I'm sorry, I couldn't generate a response. Please try again.";
+    
+    // Format the response for square root answers
+    aiMessage = formatSquareRootAnswer(aiMessage);
     
     // Add AI message to chat history
     chatHistory.push({
@@ -185,13 +203,85 @@ async function getAIResponse(userMessage) {
     return aiMessage;
 }
 
+// Format square root answers to "Square root of X = Y" format
+function formatSquareRootAnswer(text) {
+    // Normalize text by removing extra whitespace for pattern matching
+    const normalizedText = text.replace(/\s+/g, ' ');
+    
+    // Extract number from various patterns
+    let number = null;
+    let result = null;
+    
+    // Pattern 1: LaTeX with result: \sqrt{144} = 12 (handles multiline)
+    const latexWithResult = /\\sqrt\{(\d+)\}\s*=\s*(\d+)/;
+    const latexResultMatch = normalizedText.match(latexWithResult);
+    
+    if (latexResultMatch) {
+        number = parseInt(latexResultMatch[1]);
+        result = parseInt(latexResultMatch[2]);
+        // Verify it's correct
+        if (result * result === number) {
+            return `Square root of ${number} = ${result}`;
+        }
+    }
+    
+    // Pattern 2: "square root of 144" or "√144" in text
+    const sqrtTextRegex = /(?:square\s+root\s+of|sqrt|√)\s*(\d+)/i;
+    const textMatch = normalizedText.match(sqrtTextRegex);
+    
+    // Pattern 3: LaTeX \sqrt{144} (without result, need to calculate)
+    const latexRegex = /\\sqrt\{(\d+)\}/;
+    const latexMatch = normalizedText.match(latexRegex);
+    
+    // Pattern 4: Extract from "sqrt(144)" or similar
+    const sqrtFuncRegex = /sqrt\((\d+)\)/i;
+    const funcMatch = normalizedText.match(sqrtFuncRegex);
+    
+    // Determine which number to use
+    if (textMatch) {
+        number = parseInt(textMatch[1]);
+    } else if (latexMatch) {
+        number = parseInt(latexMatch[1]);
+    } else if (funcMatch) {
+        number = parseInt(funcMatch[1]);
+    }
+    
+    // If we found a number, calculate or use the result
+    if (number) {
+        if (result === null) {
+            result = Math.sqrt(number);
+            // Only format if it's a whole number
+            if (result !== Math.floor(result)) {
+                return text; // Return original if not a perfect square
+            }
+        }
+        
+        // Return in the exact format requested
+        return `Square root of ${number} = ${result}`;
+    }
+    
+    // Handle patterns like "144 = 12" where 12*12 = 144
+    const squarePattern = /(\d+)\s*=\s*(\d+)/;
+    const squareMatch = normalizedText.match(squarePattern);
+    if (squareMatch) {
+        const num = parseInt(squareMatch[1]);
+        const res = parseInt(squareMatch[2]);
+        if (num > 0 && res > 0 && res * res === num) {
+            return `Square root of ${num} = ${res}`;
+        }
+    }
+    
+    // If no pattern matched, return original text
+    return text;
+}
+
 // Add message to UI
 function addMessage(text, sender, isError = false) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${sender}`;
     
     const bubbleDiv = document.createElement('div');
-    bubbleDiv.className = 'message-bubble';
+    bubbleDiv.className = 'message-bubble tex2jax_process';
     
     // Format message text (preserve line breaks)
     const formattedText = formatMessage(text);
@@ -211,19 +301,89 @@ function addMessage(text, sender, isError = false) {
     
     // Add animation
     messageDiv.style.animation = 'messageSlide 0.3s ease-out';
+    
+    // Render MathJax equations (with small delay to ensure DOM is ready)
+    setTimeout(() => {
+        renderMathJax(bubbleDiv);
+    }, 50);
+}
+
+// Render MathJax equations in an element
+function renderMathJax(element) {
+    // Wait for MathJax to be ready
+    const tryRender = () => {
+        if (window.MathJax && window.MathJax.typesetPromise) {
+            // MathJax is ready, render the element
+            window.MathJax.typesetPromise([element]).then(() => {
+                scrollToBottom(); // Scroll again after math is rendered
+            }).catch((err) => {
+                console.warn('MathJax rendering error:', err);
+            });
+        } else if (window.MathJax && window.MathJax.startup) {
+            // Wait for startup promise
+            if (window.MathJax.startup.promise) {
+                window.MathJax.startup.promise.then(() => {
+                    if (window.MathJax && window.MathJax.typesetPromise) {
+                        window.MathJax.typesetPromise([element]).then(() => {
+                            scrollToBottom();
+                        }).catch((err) => {
+                            console.warn('MathJax rendering error:', err);
+                        });
+                    }
+                });
+            } else {
+                // MathJax is loading, wait and retry
+                setTimeout(tryRender, 200);
+            }
+        } else if (window.MathJax) {
+            // MathJax script is loaded but not initialized yet
+            setTimeout(tryRender, 200);
+        } else {
+            // MathJax not loaded at all, try again
+            setTimeout(tryRender, 500);
+        }
+    };
+    
+    // Start trying immediately
+    tryRender();
 }
 
 // Format message text
 function formatMessage(text) {
-    // Convert line breaks to <br>
-    let formatted = text.replace(/\n/g, '<br>');
+    // Protect LaTeX blocks by temporarily replacing them with placeholders
+    const latexBlocks = [];
+    let placeholderIndex = 0;
+    
+    // Store display math blocks \[ ... \] (multiline support)
+    let formatted = text.replace(/\\\[[\s\S]*?\\\]/g, (match) => {
+        const placeholder = `__LATEX_DISPLAY_${placeholderIndex}__`;
+        latexBlocks.push({ placeholder, content: match });
+        placeholderIndex++;
+        return placeholder;
+    });
+    
+    // Store inline math blocks \( ... \)
+    formatted = formatted.replace(/\\\([\s\S]*?\\\)/g, (match) => {
+        const placeholder = `__LATEX_INLINE_${placeholderIndex}__`;
+        latexBlocks.push({ placeholder, content: match });
+        placeholderIndex++;
+        return placeholder;
+    });
+    
+    // Now process regular text: convert line breaks to <br>
+    formatted = formatted.replace(/\n/g, '<br>');
     
     // Convert URLs to links
-    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const urlRegex = /(https?:\/\/[^\s<>\[\]\(\)]+)/g;
     formatted = formatted.replace(urlRegex, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: underline;">$1</a>');
     
     // Convert code blocks (basic support)
-    formatted = formatted.replace(/`([^`]+)`/g, '<code style="background: rgba(0,0,0,0.2); padding: 2px 6px; border-radius: 4px; font-family: monospace;">$1</code>');
+    formatted = formatted.replace(/`([^`\n]+)`/g, '<code style="background: rgba(0,0,0,0.2); padding: 2px 6px; border-radius: 4px; font-family: monospace;">$1</code>');
+    
+    // Restore LaTeX blocks (keep original line breaks and formatting)
+    latexBlocks.forEach(({ placeholder, content }) => {
+        formatted = formatted.replace(placeholder, content);
+    });
     
     return formatted;
 }
@@ -311,6 +471,14 @@ function loadChatHistory() {
                 });
                 
                 scrollToBottom();
+                
+                // Render MathJax for loaded messages
+                const messageBubbles = messagesContainer.querySelectorAll('.message-bubble');
+                if (messageBubbles.length > 0) {
+                    messageBubbles.forEach(bubble => {
+                        renderMathJax(bubble);
+                    });
+                }
             }
         }
     } catch (error) {

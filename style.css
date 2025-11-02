@@ -542,3 +542,42 @@ body::before {
     transition: background-color 0.2s ease, color 0.2s ease;
 }
 
+/* MathJax Styling */
+.MathJax {
+    color: inherit !important;
+    display: inline-block !important;
+}
+
+.MathJax_Display {
+    margin: 1em 0 !important;
+    text-align: center;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.message-bubble .MathJax {
+    font-size: 1em !important;
+}
+
+.message-bubble mjx-container[jax="CHTML"] {
+    display: inline-block;
+    margin: 0.2em 0;
+}
+
+.message-bubble mjx-container[jax="CHTML"][display="true"] {
+    display: block;
+    margin: 1em auto;
+    text-align: center;
+}
+
+/* Ensure MathJax renders with proper colors in message bubbles */
+.message.sent .message-bubble mjx-container,
+.message.sent .message-bubble .MathJax {
+    color: white !important;
+}
+
+.message.received .message-bubble mjx-container,
+.message.received .message-bubble .MathJax {
+    color: var(--text-primary) !important;
+}
+
